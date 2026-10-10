@@ -1,0 +1,28 @@
+Licence de consultation — dépôt de vérification de Quotum
+
+Copyright (c) 2026 MASH MEDIA. Tous droits réservés.
+
+Cette licence couvre les fichiers publiés dans le dépôt
+https://github.com/mashgundash/quotum-transparence, recopiés à l'identique depuis le code de
+l'application Quotum. Elle ne couvre ni l'application elle-même, ni son binaire, ni son
+interface, qui relèvent de la licence d'utilisation publiée sur
+https://quotum.app/LICENSE-COMMERCIAL.md.
+
+Ces fichiers sont publiés pour permettre de vérifier ce que fait l'application Quotum. Vous
+êtes autorisé à :
+
+- les lire et les télécharger ;
+- les compiler et les exécuter sur votre propre machine, à seule fin de vérifier leur
+  comportement ;
+- en citer des extraits dans une analyse, un audit ou un signalement de faille, en indiquant
+  leur provenance.
+
+Tout autre usage demande une autorisation écrite de MASH MEDIA, notamment : la copie de tout ou
+partie de ces fichiers dans un autre logiciel, la redistribution d'une version modifiée, et leur
+reprise dans un produit, gratuit ou payant. Une demande d'autorisation s'adresse par
+https://quotum.app/fr/support.
+
+Cette licence ne restreint pas les droits que les conditions d'utilisation de GitHub accordent à
+ses utilisateurs sur le contenu d'un dépôt public.
+
+Ces fichiers sont fournis tels quels, sans garantie d'aucune sorte.
