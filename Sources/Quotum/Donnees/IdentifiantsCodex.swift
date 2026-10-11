@@ -61,12 +61,15 @@ enum LectureCodex: Sendable {
     /// Lecture empêchée — droits refusés, fichier illisible, contenu inexploitable.
     /// Rien n'est établi : le jeton peut être là, intact.
     case empechee
+    /// Le CLI range la connexion là où Quotum ne peut pas la lire. Rien n'est établi du compte,
+    /// mais la ligne peut le dire.
+    case horsDePortee(EmpechementCodex)
 }
 
-/// Les identifiants que le CLI `codex` dépose sur le disque. Pendant de `Trousseau`
-/// côté Claude, à ceci près que la source est un fichier et non le Trousseau : la
-/// lecture n'ouvre aucune fenêtre d'autorisation, mais elle reste hors du fil
-/// principal — le panneau doit se dessiner pendant que le disque répond.
+/// Les identifiants que le CLI `codex` dépose sur le disque, ou au Trousseau quand son
+/// `config.toml` le demande (`TrousseauCodex`). La lecture du fichier n'ouvre aucune fenêtre
+/// d'autorisation, mais elle reste hors du fil principal — le panneau doit se dessiner
+/// pendant que le disque répond.
 enum IdentifiantsCodex {
     /// `CODEX_HOME` déplace tout le dossier de Codex, `auth.json` compris. Le lire ici
     /// plutôt que de figer `~/.codex` évite de relever le quota d'un autre profil que
@@ -81,9 +84,10 @@ enum IdentifiantsCodex {
             .appendingPathComponent("auth.json")
     }
 
+    /// Là où le CLI range la connexion de ce `CODEX_HOME` : `auth.json` ou le Trousseau, selon
+    /// son `config.toml` (`TrousseauCodex`). Lu sur un geste dont l'appelant relit le consentement avant l'envoi.
     static func jeton(fichier url: URL? = nil, cheminSansLien: Bool = false) async -> LectureCodex {
-        let cible = url ?? fichier()
-        return await HorsFil.executer { lire(cible, cheminSansLien: cheminSansLien) }
+        await TrousseauCodex.jeton(fichier: url ?? fichier(), cheminSansLien: cheminSansLien, acces: .systeme, autorise: { true })
     }
 
     /// ⚠️ Jamais `Data(contentsOf:)` ici : un tube nommé à ce chemin la ferait attendre

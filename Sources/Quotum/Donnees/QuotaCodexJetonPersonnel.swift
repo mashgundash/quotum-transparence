@@ -42,10 +42,12 @@ enum QuotaCodexJetonPersonnel {
         var plan: String?
     }
 
+    /// `autorise` est relu juste avant chacune des deux requêtes : faux, la suivante ne part pas.
     static func relever(jeton: JetonPersonnelCodex,
                         session: URLSession = Reseau.session,
-                        delai: TimeInterval = 8) async -> ReleveCodex {
-        guard let requeteIdentite = requeteIdentite(jeton: jeton, delai: delai) else { return .indetermine }
+                        delai: TimeInterval = 8,
+                        autorise: @Sendable () -> Bool) async -> ReleveCodex {
+        guard autorise(), let requeteIdentite = requeteIdentite(jeton: jeton, delai: delai) else { return .indetermine }
         let identite: Identite
         switch await charger(requeteIdentite, session: session, sujet: "identité") {
         case .jetonRefuse: return .reconnexionNecessaire
@@ -59,7 +61,7 @@ enum QuotaCodexJetonPersonnel {
             identite = lue
         }
 
-        guard let requeteUsage = requeteUsage(jeton: jeton, compte: identite.compte, delai: delai) else {
+        guard autorise(), let requeteUsage = requeteUsage(jeton: jeton, compte: identite.compte, delai: delai) else {
             return .indetermine
         }
         switch await charger(requeteUsage, session: session, sujet: "mesure") {

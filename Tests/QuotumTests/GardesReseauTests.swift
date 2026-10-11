@@ -110,6 +110,9 @@ struct GardesReseauTests {
         // L'organisation choisie par `droid`, pour que la réponse décrive la même.
         .factory: ["authorization", "accept", "user-agent", QuotaFactory.enteteOrganisation.lowercased()],
         .muse: ["authorization", "content-type", "accept", "x-api-version", "user-agent"],
+        // La clé collée, seule : ni identifiant d'organisation, ni en-tête d'un client officiel.
+        .zai: ["authorization", "accept", "user-agent"],
+        .minimax: ["authorization", "accept", "user-agent"],
     ]
 
     /// Les cinq outils dont Quotum n'émet aucune requête : JetBrains AI se lit dans un fichier
@@ -132,6 +135,7 @@ struct GardesReseauTests {
     private static let jetonGrokBot = JetonCursor(valeur: "jeton-de-test", utilisateurIdentifiant: "user-de-test", courriel: nil, expireA: nil)
     private static let jetonCopilot = JetonCopilot(valeur: "jeton-de-test", utilisateur: nil)
     private static let jetonKilo = JetonKilo(valeur: "jeton-de-test")
+    private static let cleOutil = try! CleOutil.valider("cle-collee-de-test-0123456789").get()
     private static let jetonCline = JetonClinePass(valeur: "workos:jeton-de-test")
     private static let jetonKimi = JetonKimi(valeur: "jeton-de-test", expireA: nil)
     private static let jetonNous = JetonNous(valeur: "jeton-de-test", portail: IdentifiantsNous.portailParDefaut,
@@ -185,12 +189,17 @@ struct GardesReseauTests {
             try #require(QuotaFactory.requete(jeton: jetonFactory, delai: 8))
         case .muse:
             try #require(QuotaMuse.requete(jeton: jetonMuse, delai: 8))
+        // La région internationale ici ; celle de Chine s'ajoute dans `requetesSortantes`.
+        case .zai:
+            try #require(QuotaZai.requete(cle: cleOutil, region: .internationale, delai: 8))
+        case .minimax:
+            try #require(QuotaMiniMax.requete(cle: cleOutil, region: .internationale, delai: 8))
         case .jetbrains, .antigravity, .doubao, .alibaba, .amp:
             nil
         }
     }
 
-    /// Les dix-huit lecteurs qui émettent une requête, plus les dix-sept requêtes qui
+    /// Les vingt lecteurs qui émettent une requête, plus les dix-neuf requêtes qui
     /// n'appartiennent à aucun d'eux.
     private static func requetesSortantes() throws -> [(String, URLRequest)] {
         let statut = try #require(SourceProxy.adresseLocale("http://127.0.0.1:8787/abc123/_proxy/status"))
@@ -257,6 +266,10 @@ struct GardesReseauTests {
         toutes.append(("Azure, les budgets",
                        DepenseAzure.requeteGestion(try #require(DepenseAzure.adresseBudgets(abonnement: azure.abonnement)),
                                                    jeton: jeton, delai: 8)))
+        // Les clés collées de Z.ai et MiniMax : la région de Chine, l'internationale venant de
+        // `requete(pour:)`.
+        toutes.append(("Z.ai, Chine", try #require(QuotaZai.requete(cle: cleOutil, region: .chine, delai: 8))))
+        toutes.append(("MiniMax, Chine", try #require(QuotaMiniMax.requete(cle: cleOutil, region: .chine, delai: 8))))
         return toutes
     }
 
@@ -348,7 +361,7 @@ struct GardesReseauTests {
     func aucunDeguisementEnClientOfficiel() throws {
         let sortantes = try Self.requetesSortantes()
         // Sans ce plancher, une liste devenue vide passerait sans rien avoir regardé.
-        #expect(sortantes.count == Fournisseur.allCases.count - Self.sansRequete.count + 17)
+        #expect(sortantes.count == Fournisseur.allCases.count - Self.sansRequete.count + 19)
         let fautes = Self.imitations(sortantes, admises: Self.exceptionsAdmises)
         #expect(fautes.isEmpty, "l'app s'y annonce comme le client officiel : \(fautes.joined(separator: " · "))")
         // Hors des deux requêtes du jeton personnel, aucune ne porte même un User-Agent de client.
@@ -579,6 +592,31 @@ struct GardesReseauTests {
         #expect(requete.value(forHTTPHeaderField: "User-Agent") == "Quotum")
         let noms = Set((requete.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
         #expect(noms == ["authorization", "accept", "user-agent"])
+    }
+
+    /// Les deux régions de chaque clé collée, hôte par hôte : la requête internationale est celle
+    /// du `Fournisseur`, la chinoise s'y ajoute.
+    @Test("Les clés collées de Z.ai et MiniMax : quatre GET, un hôte par région, trois en-têtes et rien d'autre")
+    func entetesDesClesOutil() throws {
+        let attendues = [
+            "Z.ai": "https://api.z.ai/api/monitor/usage/quota/limit",
+            "Z.ai, Chine": "https://open.bigmodel.cn/api/monitor/usage/quota/limit",
+            "MiniMax": "https://www.minimax.io/v1/token_plan/remains",
+            "MiniMax, Chine": "https://api.minimaxi.com/v1/token_plan/remains",
+        ]
+        let toutes = try Self.requetesSortantes()
+        for (destinataire, adresse) in attendues.sorted(by: { $0.key < $1.key }) {
+            let trouvees = toutes.filter { $0.0 == destinataire }
+            try #require(trouvees.count == 1, "\(destinataire) n'est plus énumérée une fois et une seule")
+            let requete = trouvees[0].1
+            #expect(requete.url?.absoluteString == adresse, "\(destinataire)")
+            #expect(requete.httpMethod == "GET")
+            #expect(requete.httpBody == nil)
+            #expect(requete.value(forHTTPHeaderField: "Authorization") == "Bearer " + Self.cleOutil.valeur)
+            #expect(requete.value(forHTTPHeaderField: "User-Agent") == "Quotum")
+            let noms = Set((requete.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
+            #expect(noms == ["authorization", "accept", "user-agent"], "\(destinataire) : \(noms.sorted())")
+        }
     }
 
     @Test("L'app s'annonce auprès de ChatGPT sous son propre nom")

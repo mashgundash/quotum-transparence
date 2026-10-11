@@ -2,9 +2,10 @@
 
 Quotum est une application de barre de menus pour macOS, vendue sur
 [quotum.app](https://quotum.app/fr/). Elle affiche ce qu'il reste de quota sur vos comptes d'outils
-de codage — vingt-trois outils, de Claude et Codex à Cursor, Windsurf, Grok, Kiro ou GitHub
-Copilot — en relisant les identifiants que ces outils ont déjà posés sur votre machine, ou en
-lançant leur outil en ligne de commande officiel, sur sa seule commande d'affichage du quota.
+de codage — vingt-cinq outils, de Claude et Codex à Cursor, Windsurf, Grok, Kiro ou GitHub
+Copilot — en relisant les identifiants que ces outils ont déjà posés sur votre machine, en
+lançant leur outil en ligne de commande officiel, sur sa seule commande d'affichage du quota, ou,
+pour Z.ai et MiniMax, avec la clé que vous collez vous-même.
 ⚠️ Pour Antigravity, rien d'officiel ne garantit que cette commande ne consomme aucun quota : la
 mise en garde est affichée avant que vous suiviez l'outil.
 
@@ -57,8 +58,9 @@ diff <(find . -path ./.git -prune -o \( -type f -o -type l \) ! -path ./SHA256SU
 | `Sources/Quotum/Systeme/Processus.swift` | L'exécution des utilitaires système, arguments en tableau, jamais par un shell |
 | `Sources/Quotum/Donnees/Trousseau.swift` | La seule lecture d'un élément du Trousseau qui appartient à un autre outil, par `/usr/bin/security` |
 | `Sources/Quotum/Donnees/IdentifiantsCodex.swift` | `~/.codex/auth.json`, et chaque autre `auth.json` de Codex connu, un même dossier une seule fois, lus sans être réécrits |
+| `Sources/Quotum/Donnees/TrousseauCodex.swift` | La connexion de Codex quand son `config.toml` la range au Trousseau (`cli_auth_credentials_store` à `keyring` ou `auto`), lu par un analyseur TOML complet qui ne devine jamais un mode incertain : l'élément `Codex Auth` du compte `cli\|…` de ce `CODEX_HOME`, lu par la fonction de `Trousseau.swift`, jamais écrit ; en `auto`, `auth.json` seulement si l'élément est absent ; le stockage chiffré (`secret_auth_storage`) n'est pas lu ; un refus suspend la lecture jusqu'à « Actualiser » ; le suivi se relit juste avant chaque ouverture, pour `auth.json` dans le travail même de la file |
 | `Sources/Quotum/Donnees/IdentiteClaudeCode.swift` | `~/.claude.json`, trois clés, aucun jeton |
-| `Sources/Quotum/Donnees/Quota*.swift` (24) | Un fichier par outil, plus un second pour Codex connecté par jeton personnel : l'identifiant lu, la requête envoyée ou l'outil lancé, la réponse lue |
+| `Sources/Quotum/Donnees/Quota*.swift` (26) | Un fichier par outil, plus un second pour Codex connecté par jeton personnel : l'identifiant lu, la requête envoyée ou l'outil lancé, la réponse lue |
 | `Sources/Quotum/Donnees/ReleveurMuse.swift` | La cadence de Muse Code — chaque mesure crée une clé sur votre compte Meta : un envoi au plus toutes les quinze minutes, même après une relance de l'application |
 | `Sources/Quotum/Systeme/LanceurCLISysteme.swift`, `Sources/Quotum/Systeme/ResultatCLI.swift`, `Sources/Quotum/Donnees/OutilsCLI.swift` | La seule exécution d'un binaire tiers : chemin vérifié, liste fermée, jamais de shell, sortie bornée |
 | `Sources/Quotum/Donnees/ReserveCodex.swift` | La réserve et l'historique des réinitialisations Codex, lus quand vous dépliez le tiroir |
@@ -75,7 +77,8 @@ diff <(find . -path ./.git -prune -o \( -type f -o -type l \) ! -path ./SHA256SU
 | `Sources/Quotum/Donnees/ReinitialisationAutomatique.swift` | Le mode sans confirmation, éteint par défaut |
 | `Sources/Quotum/Systeme/MiseAJour.swift` | Les mises à jour : la seule des trois requêtes vers l'éditeur dont le code est ici |
 | `Sources/Quotum/Donnees/DepenseAnthropicEntreprise.swift` | La clé de lecture : la garde de saisie, et la seule requête qu'elle permet, la dépense Claude Enterprise |
-| `Sources/Quotum/Donnees/ClesDeLecture.swift` | L'une des deux écritures au Trousseau : la clé de lecture que vous avez collée, dans un élément propre à Quotum |
+| `Sources/Quotum/Donnees/ClesDeLecture.swift` | L'une des écritures au Trousseau : la clé de lecture que vous avez collée, dans un élément propre à Quotum |
+| `Sources/Quotum/Donnees/ClesOutil.swift` | L'autre écriture au Trousseau d'une clé collée : celle de Z.ai ou de MiniMax, dans un élément propre à Quotum (`app.quotum.mac.cle-outil`), avec sa région ; la clé relue repasse par la garde de saisie avant de partir, et ne part qu'à l'hôte de sa région (`QuotaZai.swift`, `QuotaMiniMax.swift`) |
 | `Sources/Quotum/Donnees/SuiviCleLecture.swift` | Sans clé, aucune requête ; le secret relu repasse par la garde avant de partir |
 | `Sources/Quotum/Donnees/DepenseBudget.swift`, `Sources/Quotum/Donnees/SignatureAWS.swift`, `Sources/Quotum/Donnees/DepenseAWS.swift`, `Sources/Quotum/Donnees/DepenseAzure.swift` | Les budgets AWS et Azure, lus par une identité que vous avez collée. AWS : la signature faite sur le Mac et l'utilisateur racine refusé, mais aucune route ne permet de vérifier que l'identité n'a pas d'autres droits — l'écran de saisie le dit. Azure : toute permission du principal qui n'est pas une lecture fait refuser l'identité avant de lire un budget |
 | `Tests/QuotumTests/GardesReseauTests.swift` | Le garde qui énumère chaque requête et ses en-têtes exacts, y compris le contrat des deux requêtes de la licence et de l'essai, dont le code n'est pas ici |
@@ -83,7 +86,7 @@ diff <(find . -path ./.git -prune -o \( -type f -o -type l \) ! -path ./SHA256SU
 ## Vérifier, promesse par promesse
 
 Chaque commande s'exécute à la racine de ce dépôt. Les résultats donnés ont été relevés le
-2026-10-09 ; une ligne qui aurait bougé depuis se retrouve par le même `grep`.
+2026-10-11 ; une ligne qui aurait bougé depuis se retrouve par le même `grep`.
 
 ### La session réseau ne garde rien
 
@@ -115,13 +118,14 @@ grep -rnE '\bprint\(|NSLog|\bdump\(' Sources/
 ne rend rien. Les seules journalisations passent par `Journal.donnees` (`os.Logger`) ; lisez-les :
 aucune n'interpole un jeton.
 
-### Les identifiants des autres outils sont lus à un seul endroit ; deux écritures, dans des éléments propres à Quotum
+### Les identifiants des autres outils sont lus à un seul endroit ; trois écritures, dans des éléments propres à Quotum
 
 ```sh
 grep -rn 'find-generic-password' Sources/
 ```
 rend `Trousseau.swift:67` (commentaire) et `Trousseau.swift:91`, l'unique appel. Warp passe par
-la même fonction (`QuotaWarp.swift:69`). Aucune commande d'écriture du Trousseau
+la même fonction (`QuotaWarp.swift:69`), comme Codex quand il range sa connexion au Trousseau
+(`TrousseauCodex.swift`, élément `Codex Auth`). Aucune commande d'écriture du Trousseau
 (`add-generic-password`, `delete-generic-password`) n'apparaît.
 
 ```sh
@@ -129,8 +133,10 @@ grep -rn 'SecItemAdd\|SecItemUpdate\|SecItemDelete' Sources/
 ```
 rend `ClesDeLecture.swift:100`, `:104` et `:107` : l'élément « Quotum — clé de lecture »
 (service `app.quotum.mac.cle-lecture`), écrit seulement quand vous collez une clé de lecture, et
-supprimé quand vous la retirez. L'autre écriture de l'application au Trousseau est l'élément
-« Quotum — essai ». Son code appartient à la mécanique de l'essai et n'est pas publié ; la
+supprimé quand vous la retirez ; puis `ClesOutil.swift:136`, `:141` et `:144` : les éléments
+« Quotum — clé Z.ai » et « Quotum — clé MiniMax » (service `app.quotum.mac.cle-outil`), écrits
+seulement quand vous collez la clé de l'un de ces outils, et supprimés quand vous la retirez. La
+troisième écriture de l'application au Trousseau est l'élément « Quotum — essai ». Son code appartient à la mécanique de l'essai et n'est pas publié ; la
 [politique de confidentialité](https://quotum.app/PRIVACY.md) dit ce qu'il contient, et
 l'élément se lit dans Trousseaux d'accès. Aucun élément d'un autre outil n'est modifié.
 
@@ -139,7 +145,7 @@ l'élément se lit dans Trousseaux d'accès. Aucun élément d'un autre outil n'
 ```sh
 grep -rn 'session.data(for:' Sources/
 ```
-rend vingt-cinq lignes : les dix-huit lecteurs qui émettent une requête, la mesure d'un compte
+rend vingt-sept lignes : les vingt lecteurs qui émettent une requête, la mesure d'un compte
 Codex connecté par jeton personnel, la lecture d'un proxy, la réinitialisation et la réserve de
 Codex, et les trois dépenses lues par une clé de lecture —
 Claude Enterprise, AWS et Azure. JetBrains AI n'en émet aucune : son quota se lit dans un fichier.
@@ -171,8 +177,8 @@ complet**, et voici exactement lesquelles manquent :
 
 | Lignes absentes | Pourquoi elles ne sont pas ici |
 |---|---|
-| `Compte.swift:61, 62, 66-72, 75-88, 183, 184` | La page d'accueil et la page de téléchargement de chaque outil, **ouvertes par votre navigateur**, jamais interrogées par l'application (tableau B du site) |
-| `VueReglages.swift:718` | `https://exemple.test`, adresse jetable qui sert à demander à macOS la liste des navigateurs (tableau C) |
+| `Compte.swift:64, 65, 69-75, 78-93, 190, 191` | La page d'accueil et la page de téléchargement de chaque outil, **ouvertes par votre navigateur**, jamais interrogées par l'application (tableau B du site) |
+| `VueReglages.swift:799` | `https://exemple.test`, adresse jetable qui sert à demander à macOS la liste des navigateurs (tableau C) |
 | `VueFinEssai.swift:13, 14` | Les deux pages d'achat du site, française et anglaise, **ouvertes par votre navigateur** à la fin de l'essai (tableau B) |
 | `CommandesInstallation.swift:9, 10` | Les installeurs officiels de Claude Code et de Codex, **une commande à copier** que l'accueil affiche quand il ne trouve aucune session : Quotum ne la lance jamais (tableau C) |
 | `AdressesLicences.swift:5, 9` | Le service des licences de l'éditeur, et son double de test, compilé dans les seules copies de développement (tableau A) : la mécanique de licence n'est pas publiée |
@@ -196,7 +202,7 @@ redirection.
 grep -c 'sousConsentement(\.' Sources/Quotum/Donnees/RelevesDirects.swift
 grep -n 'mesureParJeton: \[String: Bool\] = \[:\]' Sources/Quotum/Modeles/Reglages.swift
 ```
-rendent `23` — un passage par la garde pour chacun des vingt-trois outils — et la ligne `364`, où
+rendent `25` — un passage par la garde pour chacun des vingt-cinq outils — et la ligne `478`, où
 le consentement vaut « aucun outil suivi » à l'installation. `RelevesDirects.sousConsentement` ne
 **lance** pas le lecteur d'un outil non suivi : ni jeton demandé, ni fichier ouvert, ni
 requête.
@@ -213,12 +219,14 @@ de Quotum lui-même, qu'aucun autre outil n'écrit. Son code n'est pas publié.
 
 Une autre se fait hors de ce cycle, à l'ouverture de la feuille « Ajouter un compte » :
 `TracesAjoutOutil.surCeMac` vérifie seulement que les fichiers d'identifiants de quinze des
-vingt-trois outils existent — ou, pour Nous Portal et Factory Droid, leur dossier ; pour Windsurf,
+vingt-cinq outils existent — ou, pour Nous Portal et Factory Droid, leur dossier ; pour Windsurf,
 aussi ses deux bases d'éditeur ; Grok Bot partage la base de Cursor —, sans les ouvrir, avant
 même que le suivi soit activé ; les chemins sont ceux des lecteurs, cités un par un dans la
 [politique de confidentialité](https://quotum.app/PRIVACY.md).
-Claude et Codex, Warp, JetBrains AI et les quatre outils lancés par leur outil en
-ligne de commande n'y sont pas regardés. Elle regarde aussi si
+Claude et Codex, Warp, JetBrains AI, les quatre outils lancés par leur outil en
+ligne de commande, Z.ai et MiniMax n'y sont pas regardés ; pour ces deux derniers, la feuille
+regarde seulement si une clé est enregistrée dans l'élément du Trousseau propre à Quotum, sans la
+lire (`ClesOutil.swift`). Elle regarde aussi si
 `GROK_DEPLOYMENT_KEY` est posée, et n'interroge pas le Trousseau. Son code n'est pas publié.
 
 Pour les journaux de session du CLI Codex, les bornes annoncées par le site :
@@ -234,7 +242,7 @@ chacun, 512 Kio au plus.
 ```sh
 grep -n 'plancherRafraichissement: TimeInterval' Sources/Quotum/Modeles/Reglages.swift
 ```
-rend `653: … = 60`.
+rend `834: … = 60`.
 
 ### Les deux écritures sur un compte
 
@@ -251,8 +259,8 @@ rend la seconde : chaque mesure de Muse Code crée une clé sur votre compte Met
 d'obtenir son quota. La clé créée n'est ni décodée, ni gardée, ni journalisée, et
 `ReleveurMuse.swift` borne l'envoi à un toutes les quinze minutes, même après une relance de
 l'application ; la mise en garde est affichée avant que vous suiviez l'outil. Les autres `POST`
-du dépôt (Windsurf, Warp, Augment) sont des lectures que ces services exposent sous cette
-méthode.
+du dépôt (Windsurf, Warp, Augment, Grok Bot, et les deux d'AWS, l'identité puis le budget) sont des lectures que ces services
+exposent sous cette méthode ; celui d'Azure demande le jeton qui permet de lire le budget.
 
 Les conditions de la réinitialisation Codex, dans `ArmementReinitialisation.swift` : Codex seulement, le cas `.chatgpt`
 (ligne 76), un crédit restant, un épuisement **constaté par le serveur**, une mesure de moins de
@@ -261,7 +269,7 @@ dix minutes (`fraicheurMaximale`, ligne 24), une échéance encore devant.
 ```sh
 grep -n 'reinitialisationAutomatique = false' Sources/Quotum/Modeles/Reglages.swift
 ```
-rend `338` : le mode sans confirmation est éteint à l'installation.
+rend `452` : le mode sans confirmation est éteint à l'installation.
 
 Les fichiers que ce dépôt écrit sont le registre qui empêche la double dépense, dans le dossier
 de Quotum lui-même, et le dossier temporaire privé (droits `0700`) que `LanceurCLISysteme.swift`
@@ -291,7 +299,7 @@ les deux requêtes de la section suivante.
 ### Les trois requêtes vers l'éditeur
 
 `MiseAJour.swift` n'arme la vérification des mises à jour que sur une adresse de flux en `https`
-(ligne 68). Elle ne dépend pas de votre consentement de mesure, et le site le dit.
+(ligne 71). Elle ne dépend pas de votre consentement de mesure, et le site le dit.
 
 Les deux autres appartiennent à la licence et à l'essai. Leur constructeur n'est pas publié : il
 vit dans les mêmes fichiers que la vérification de la réponse, que publier dirait quoi
@@ -304,7 +312,7 @@ s'ajoute ou disparaît. Pour le constater sans ce code, observez le trafic de l'
 ```sh
 grep -n '"demande", "jeton_appareil"\|"cle", "cle_publique", "preuve"' Tests/QuotumTests/GardesReseauTests.swift
 ```
-rend les lignes `473` et `488` : les champs de l'activation, puis ceux de l'essai.
+rend les lignes `486` et `501` : les champs de l'activation, puis ceux de l'essai.
 
 La deuxième est l'ouverture de l'essai : un `POST` à `/essai`, au premier lancement, qui emporte un
 code tiré au hasard sur ce Mac et un jeton qu'Apple délivre à ce Mac par DeviceCheck — rien

@@ -28,8 +28,11 @@ enum MiseAJour {
 
         verificateur = SPUStandardUpdaterController(startingUpdater: true,
                                                     updaterDelegate: nil,
-                                                    userDriverDelegate: nil)
+                                                    userDriverDelegate: rappelsDoux)
     }
+
+    /// Retenu ici : Sparkle ne garde son délégué que faiblement.
+    static let rappelsDoux = RappelsDoux(pastille: .partagee)
 
     /// Faux sans updater armé — copie sans flux —, et pendant que Sparkle télécharge déjà
     /// en arrière-plan. Relu à chaque ouverture du menu, jamais figé à sa construction.
@@ -97,3 +100,4 @@ extension SPUStandardUpdaterController: VerificateurMisesAJour {
         }
     }
 }
+

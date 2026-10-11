@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 enum AffichageBarre: String, Codable, Sendable, CaseIterable {
     case icone, iconeEtPourcentage, iconeEtCompte
@@ -23,6 +24,35 @@ enum Apparence: String, Codable, Sendable, CaseIterable {
         case .sombre: Mots.dit("Sombre")
         case .automatique: Mots.dit("Automatique")
         }
+    }
+}
+
+/// Les heures pendant lesquelles une notification arrive sans son ni bannière. Une liste
+/// fermée de plages : une valeur inconnue se relit « éteintes », jamais une plage que
+/// personne n'a choisie.
+enum HeuresCalmes: String, Codable, Sendable, CaseIterable {
+    case desactivees
+    case de22a8 = "22-08"
+    case de23a7 = "23-07"
+    case de20a9 = "20-09"
+
+    /// Début et fin, en heures pleines de l'heure locale ; la fin est exclue.
+    var plage: (debut: Int, fin: Int)? {
+        switch self {
+        case .desactivees: nil
+        case .de22a8: (22, 8)
+        case .de23a7: (23, 7)
+        case .de20a9: (20, 9)
+        }
+    }
+
+    /// L'instant tombe dans la plage. Une plage qui enjambe minuit couvre la fin de soirée
+    /// et le début de matinée.
+    func contient(_ instant: Date, calendrier: Calendar) -> Bool {
+        guard let plage else { return false }
+        let heure = calendrier.component(.hour, from: instant)
+        if plage.debut <= plage.fin { return heure >= plage.debut && heure < plage.fin }
+        return heure >= plage.debut || heure < plage.fin
     }
 }
 
@@ -71,8 +101,12 @@ enum TerminalCible: String, Codable, Sendable, CaseIterable {
 /// ajouté demain a sa décision du seul fait d'exister, et elle vaut « non armé ».
 struct ConsentementMesure: Sendable, Equatable {
     private var armes: Set<Fournisseur>
+    private(set) var revocations: RevocationsMesure
 
-    init(_ armes: Set<Fournisseur> = []) { self.armes = armes }
+    init(_ armes: Set<Fournisseur> = [], revocations: RevocationsMesure = RevocationsMesure()) {
+        self.armes = armes
+        self.revocations = revocations
+    }
 
     /// L'état d'une installation neuve, et celui de qui a répondu « Pas maintenant ».
     static let aucun = ConsentementMesure()
@@ -80,16 +114,59 @@ struct ConsentementMesure: Sendable, Equatable {
     subscript(fournisseur: Fournisseur) -> Bool {
         get { armes.contains(fournisseur) }
         set {
-            if newValue { armes.insert(fournisseur) } else { armes.remove(fournisseur) }
+            if newValue {
+                armes.insert(fournisseur)
+            } else if armes.remove(fournisseur) != nil {
+                revocations.revoquer(fournisseur)
+            }
         }
     }
 
     var nombreArmes: Int { armes.count }
 
-    /// Ce qui reste autorisé des deux côtés : un suivi retiré en cours de route ne revient pas.
+    /// Ce qui reste autorisé des deux côtés : un suivi retiré en cours de route ne revient pas,
+    /// même réarmé depuis — une révocation de plus d'un côté suffit à l'exclure.
     func restreint(a autre: ConsentementMesure) -> ConsentementMesure {
-        ConsentementMesure(armes.intersection(autre.armes))
+        ConsentementMesure(armes.filter { autre.armes.contains($0) && revocations[$0] == autre.revocations[$0] },
+                           revocations: autre.revocations)
     }
+}
+
+/// Combien de fois, depuis le lancement, chaque suivi a été retiré ou la clé collée de son outil
+/// changée. Une autorisation lue avant une révocation ne vaut plus après, même si le suivi a été
+/// réarmé et une autre clé collée entre-temps : c'est ce qui empêche une mesure faite avec
+/// l'ancienne clé d'être publiée pour la nouvelle.
+///
+/// En mémoire seulement : jamais écrites avec les réglages.
+struct RevocationsMesure: Sendable, Equatable {
+    private var compteurs: [Fournisseur: UInt64] = [:]
+
+    init() {}
+
+    subscript(fournisseur: Fournisseur) -> UInt64 { compteurs[fournisseur, default: 0] }
+
+    mutating func revoquer(_ fournisseur: Fournisseur) { compteurs[fournisseur, default: 0] &+= 1 }
+
+    /// Ce qu'une modification laisse : jamais moins qu'avant, et une révocation de plus pour chaque
+    /// suivi qu'elle retire sans l'avoir comptée. Une copie ancienne des réglages réécrite telle
+    /// quelle ne fait donc jamais revenir une autorisation périmée.
+    func suivies(de modifiees: RevocationsMesure, retires: Set<Fournisseur>) -> RevocationsMesure {
+        var resultat = RevocationsMesure()
+        for fournisseur in Set(compteurs.keys).union(modifiees.compteurs.keys).union(retires) {
+            let plus = max(self[fournisseur], modifiees[fournisseur])
+            resultat.compteurs[fournisseur] = retires.contains(fournisseur) && plus == self[fournisseur] ? plus &+ 1 : plus
+        }
+        return resultat
+    }
+}
+
+/// Une valeur que les réglages portent sans qu'elle compte dans leur égalité : `Reglages` se compare
+/// pour savoir si l'utilisateur a changé un réglage, et une révocation n'en est pas un. Le
+/// consentement, lui, compare ses révocations : deux autorisations différentes n'y sont pas égales.
+struct HorsEgaliteReglages<Valeur: Sendable>: Sendable, Equatable {
+    var valeur: Valeur
+
+    static func == (_: HorsEgaliteReglages, _: HorsEgaliteReglages) -> Bool { true }
 }
 
 /// Ce qu'un relevé par jeton prend à l'utilisateur, fournisseur par fournisseur : la
@@ -107,6 +184,9 @@ enum MesureParJeton {
         case fichierDeQuota
         /// Rien : son CLI officiel est lancé, en lecture seule, et interroge son serveur.
         case outilLance
+        /// Rien d'un autre outil : la clé que l'utilisateur a collée dans Quotum, gardée dans son
+        /// propre élément du Trousseau.
+        case cleCollee
     }
 
     struct Description: Identifiable, Sendable, Equatable {
@@ -121,6 +201,7 @@ enum MesureParJeton {
             switch fournisseur {
             case .jetbrains: .fichierDeQuota
             case .antigravity, .doubao, .alibaba, .amp: .outilLance
+            case .zai, .minimax: .cleCollee
             case .claude, .chatgpt, .windsurf, .cursor, .warp, .codebuff, .augment, .opencode, .grok, .grokBot,
                  .copilot, .kiro, .cline, .kimi, .kilo, .nous, .factory, .muse: .connexion
             }
@@ -135,10 +216,10 @@ enum MesureParJeton {
                         detail: Mots.dit("Connexion du Trousseau · deux requêtes à api.anthropic.com"))
         case .chatgpt:
             Description(fournisseur: fournisseur,
-                        chemin: "<CODEX_HOME>/auth.json",
+                        chemin: Mots.dit("<CODEX_HOME>/auth.json · Trousseau · « %1$@ »", TrousseauCodex.service),
                         // La seconde requête est celle de la mesure par jeton personnel
                         // (`QuotaCodexJetonPersonnel`) : la route d'identité d'OpenAI.
-                        detail: Mots.dit("Les connexions de Codex : ~/.codex/auth.json ou $CODEX_HOME, le CODEX_HOME de chaque app de compte, et le dossier que publie un proxy local · une requête à chatgpt.com par fichier auth.json lu, un même dossier une seule fois, plus une à auth.openai.com pour une clé d'accès personnelle · et, quand vous dépliez le tiroir d'un compte, deux lectures à chatgpt.com : sa réserve de réinitialisations et leur historique"))
+                        detail: Mots.dit("Les connexions de Codex : ~/.codex/auth.json ou $CODEX_HOME, ou l'élément « Codex Auth » du Trousseau quand Codex y range sa connexion, le CODEX_HOME de chaque app de compte, et le dossier que publie un proxy local · une requête à chatgpt.com par fichier auth.json lu, un même dossier une seule fois, plus une à auth.openai.com pour une clé d'accès personnelle · et, quand vous dépliez le tiroir d'un compte, deux lectures à chatgpt.com : sa réserve de réinitialisations et leur historique"))
         case .windsurf:
             Description(fournisseur: fournisseur,
                         chemin: "~/Library/…/Windsurf/…/state.vscdb · ~/.local/share/devin/credentials.toml",
@@ -244,6 +325,18 @@ enum MesureParJeton {
                         chemin: "amp usage",
                         detail: Mots.dit("Lance « %1$@ », en lecture seule : l'outil interroge lui-même son serveur",
                                          "amp usage"))
+        // Les deux suivants ne lisent rien d'un autre outil : la clé que l'utilisateur colle dans
+        // Quotum, rangée dans l'élément du Trousseau propre à Quotum, désigné par son libellé.
+        case .zai:
+            Description(fournisseur: fournisseur,
+                        chemin: Mots.dit("Trousseau · « %1$@ »", MagasinClesOutil.libelle(.zai)),
+                        detail: Mots.dit("Clé que vous avez collée dans Quotum, gardée dans son propre élément du Trousseau · une requête à %1$@ ou à %2$@, selon la région du compte",
+                                         QuotaZai.hoteInternational, QuotaZai.hoteChine))
+        case .minimax:
+            Description(fournisseur: fournisseur,
+                        chemin: Mots.dit("Trousseau · « %1$@ »", MagasinClesOutil.libelle(.minimax)),
+                        detail: Mots.dit("Clé que vous avez collée dans Quotum, gardée dans son propre élément du Trousseau · une requête à %1$@ ou à %2$@, selon la région du compte",
+                                         QuotaMiniMax.hoteInternational, QuotaMiniMax.hoteChine))
         }
     }
 
@@ -260,7 +353,7 @@ enum MesureParJeton {
 /// Cline et Kilo Code sont des agents : c'est la connexion de leur outil en ligne de
 /// commande qui est lue (`~/.cline`, `~/.local/share/kilo`), pas celle d'un éditeur.
 enum FamilleOutil: CaseIterable, Sendable {
-    case claudeEtCodex, editeurs, agentsEnLigneDeCommande, lusParLeurOutil
+    case claudeEtCodex, editeurs, agentsEnLigneDeCommande, lusParLeurOutil, avecUneCleCollee
 
     static func de(_ fournisseur: Fournisseur) -> FamilleOutil {
         switch fournisseur {
@@ -268,6 +361,7 @@ enum FamilleOutil: CaseIterable, Sendable {
         case .windsurf, .cursor, .warp, .augment, .grokBot, .copilot, .kiro, .jetbrains: .editeurs
         case .codebuff, .opencode, .grok, .cline, .kimi, .kilo, .nous, .factory, .muse: .agentsEnLigneDeCommande
         case .antigravity, .doubao, .alibaba, .amp: .lusParLeurOutil
+        case .zai, .minimax: .avecUneCleCollee
         }
     }
 
@@ -277,6 +371,7 @@ enum FamilleOutil: CaseIterable, Sendable {
         case .editeurs: Mots.dit("Éditeurs de code")
         case .agentsEnLigneDeCommande: Mots.dit("Agents en ligne de commande")
         case .lusParLeurOutil: Mots.dit("Lus par leur outil")
+        case .avecUneCleCollee: Mots.dit("Avec une clé que vous collez")
         }
     }
 
@@ -301,9 +396,26 @@ struct Reglages: Codable, Sendable, Equatable {
     /// Le compte dont la barre de menus montre le pourcentage en mode « Icône + % », par son
     /// identifiant. `nil` : le plus utilisé, celui qui bloquera en premier (`ligneBarre`).
     var compteBarre: String?
-    /// Pourcentage de consommation qui déclenche une notification. `nil` = jamais.
-    var seuilAlerte: Int? = 80
+    /// Les pourcentages de consommation qui déclenchent une notification, triés, sans
+    /// doublon, chacun entre 50 et 99. Vide = jamais.
+    var seuilsAlerte: [Int] = Reglages.seuilsParDefaut {
+        didSet {
+            let normalises = Self.normaliser(seuilsAlerte)
+            if normalises != seuilsAlerte { seuilsAlerte = normalises }
+        }
+    }
     var prevenirJetonExpirant = true
+    /// Une fenêtre dont le rythme mène à sec avant sa recharge.
+    var prevenirRythme = true
+    /// Une fenêtre vue presque épuisée, au moment où elle se recharge.
+    var prevenirRetour = true
+    var heuresCalmes: HeuresCalmes = .desactivees
+    /// Des initiales à la place des noms et des adresses.
+    var masquerNoms = false
+    /// Demander à macOS de tenir le panneau hors des captures d'écran.
+    var exclureDesCaptures = false
+    /// Écrire l'état des quotas dans un fichier local.
+    var ecrireStatutLocal = false
     /// Une dépense payante qui commence, un plafond atteint, un solde prépayé à zéro. Armé par
     /// défaut (décision Q6) : c'est de l'argent, et chaque épisode ne se dit qu'une fois.
     var prevenirDepenses = true
@@ -328,7 +440,7 @@ struct Reglages: Codable, Sendable, Equatable {
     /// mieux pour qui sépare ainsi. Un nom vide ou effacé fait revenir le défaut.
     var nomsFournisseurs: [String: String] = [:]
     /// Pastilles d'en-tête choisies par l'utilisateur, indexées par `Fournisseur.rawValue`
-    /// et écrites « #RRGGBB » en sRGB. Seize des vingt-trois teintes livrées sont des
+    /// et écrites « #RRGGBB » en sRGB. Dix-huit des vingt-cinq teintes livrées sont des
     /// repères attribués faute de couleur de marque : ce réglage est la porte de sortie de qui
     /// n'en veut pas. Une clé absente rend la teinte livrée.
     var teintesFournisseurs: [String: String] = [:]
@@ -364,6 +476,12 @@ struct Reglages: Codable, Sendable, Equatable {
     /// oublier un ; ici un fournisseur ajouté demain arrive éteint sans que personne ait
     /// à y penser.
     var mesureParJeton: [String: Bool] = [:]
+    /// Hors de `CodingKeys` : jamais écrit, chaque lancement repart de zéro.
+    private var memoireRevocations = HorsEgaliteReglages(valeur: RevocationsMesure())
+    var revocationsMesure: RevocationsMesure {
+        get { memoireRevocations.valeur }
+        set { memoireRevocations.valeur = newValue }
+    }
     /// Vrai dès que l'écran d'ouverture a été présenté. Sans lui, il reparaîtrait à
     /// chaque lancement, y compris chez qui a répondu « Pas maintenant » — et la
     /// question posée une seconde fois se lit comme une insistance, pas comme un choix.
@@ -379,6 +497,26 @@ struct Reglages: Codable, Sendable, Equatable {
 
     /// L'accueil n'a pas encore été présenté dans sa version courante.
     var accueilARevoir: Bool { versionAccueilVue < Self.versionAccueil }
+
+    static let seuilsParDefaut = [80, 95]
+    static let plageSeuils = 50...99
+
+    /// Le plus bas des seuils, celui qui prévient le premier ; `nil` quand aucun n'est réglé.
+    /// L'affecter remplace la liste par ce seul seuil.
+    var seuilAlerte: Int? {
+        get { seuilsAlerte.first }
+        set { seuilsAlerte = newValue.map { [$0] } ?? [] }
+    }
+
+    private static func normaliser(_ seuils: [Int]) -> [Int] {
+        Array(Set(seuils.filter(plageSeuils.contains))).sorted()
+    }
+
+    /// Une liste relue telle quelle si chacune de ses valeurs est un seuil admis ; sinon `nil`,
+    /// et l'appelant reprend le défaut plutôt qu'une liste amputée qu'on n'a pas choisie.
+    private static func seuilsAdmis(_ seuils: [Int]) -> [Int]? {
+        seuils.allSatisfy(plageSeuils.contains) ? normaliser(seuils) : nil
+    }
 
     static let delaiPropositionParDefaut = 12
     /// Une journée : plus prudent que la proposition, puisque personne ne confirme.
@@ -411,20 +549,28 @@ struct Reglages: Codable, Sendable, Equatable {
     }
 
     mutating func armerMesure(_ fournisseur: Fournisseur, _ arme: Bool) {
+        if !arme, mesureArmee(fournisseur) { revocationsMesure.revoquer(fournisseur) }
         mesureParJeton[fournisseur.rawValue] = arme
+    }
+
+    /// La clé collée de l'outil a changé ou disparu : ce qui a été autorisé avant ne vaut plus.
+    mutating func revoquerMesure(_ fournisseur: Fournisseur) {
+        revocationsMesure.revoquer(fournisseur)
     }
 
     /// Ce que `rafraichir()` a le droit de relever. Construit depuis
     /// `Fournisseur.allCases` : aucune liste à tenir à jour, donc aucune à oublier.
     var consentementMesure: ConsentementMesure {
-        ConsentementMesure(Set(Fournisseur.allCases.filter { mesureArmee($0) }))
+        ConsentementMesure(Set(Fournisseur.allCases.filter { mesureArmee($0) }), revocations: revocationsMesure)
     }
 
     /// Écrite à la main : dès que le type porte ses deux moitiés de `Codable`, Swift ne
     /// la synthétise plus. ⚠️ Un réglage ajouté sans sa clé ici ne serait jamais persisté.
     private enum CodingKeys: String, CodingKey {
         case apparence
-        case affichageBarre, compteBarre, seuilAlerte, prevenirJetonExpirant, prevenirDepenses, grouperParFournisseur
+        case affichageBarre, compteBarre, seuilsAlerte, prevenirJetonExpirant, prevenirDepenses, grouperParFournisseur
+        case prevenirRythme, prevenirRetour, heuresCalmes
+        case masquerNoms, exclureDesCaptures, ecrireStatutLocal
         case intervalleRafraichissementSecondes, navigateurWeb, comptes
         case nomsFournisseurs, teintesFournisseurs, reinitialisationAutomatique
         case delaiPropositionHeures, delaiAutomatiqueHeures
@@ -435,6 +581,8 @@ struct Reglages: Codable, Sendable, Equatable {
         /// réécrites : qui avait armé Claude ou ChatGPT le retrouve armé, et la décision
         /// vit désormais dans `mesureParJeton`, où les neuf tiennent.
         case mesureParJetonClaude, mesureParJetonChatgpt
+        /// Le seuil unique d'avant les seuils multiples. ⚠️ Relu, jamais réécrit.
+        case seuilAlerte
     }
 
     init() {}
@@ -444,8 +592,8 @@ struct Reglages: Codable, Sendable, Equatable {
     /// un réglage effacerait donc tous les autres au premier lancement qui suit —
     /// mesuré, pas supposé. Chaque clé est lue si elle est là, sinon le défaut tient.
     ///
-    /// `seuilAlerte` passe par `contains` : la clé absente doit rendre 80, la clé
-    /// présente à `null` doit rendre « jamais », et `decodeIfPresent` confond les deux.
+    /// Le seuil unique d'avant passe par `contains` : la clé absente doit rendre le défaut, la
+    /// clé présente à `null` doit rendre « jamais », et `decodeIfPresent` confond les deux.
     init(from decodeur: Decoder) throws {
         let bloc = try decodeur.container(keyedBy: CodingKeys.self)
         // `try?` et non `try` : une valeur d'un autre type ferait échouer tout le bloc, et
@@ -461,19 +609,50 @@ struct Reglages: Codable, Sendable, Equatable {
            !choisi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             compteBarre = choisi
         }
-        if bloc.contains(.seuilAlerte) {
-            seuilAlerte = try bloc.decodeIfPresent(Int.self, forKey: .seuilAlerte)
+        // `try?` partout : une valeur d'un autre type, ou hors de la plage, redonne le défaut
+        // sans emporter les autres réglages. La liste prime sur le seuil unique qu'elle remplace.
+        if bloc.contains(.seuilsAlerte) {
+            seuilsAlerte = (try? bloc.decode([Int].self, forKey: .seuilsAlerte)).flatMap(Self.seuilsAdmis)
+                ?? Self.seuilsParDefaut
+        } else if bloc.contains(.seuilAlerte) {
+            if (try? bloc.decodeNil(forKey: .seuilAlerte)) == true {
+                seuilsAlerte = []
+            } else if let seuil = try? bloc.decode(Int.self, forKey: .seuilAlerte),
+                      Self.plageSeuils.contains(seuil) {
+                seuilsAlerte = [seuil]
+            } else {
+                seuilsAlerte = Self.seuilsParDefaut
+            }
         }
         prevenirJetonExpirant = try bloc.decodeIfPresent(Bool.self, forKey: .prevenirJetonExpirant)
             ?? prevenirJetonExpirant
-        // `try?` : une valeur d'un autre type ne fait pas tomber les autres réglages. Absente —
-        // des réglages écrits avant cette alerte —, elle suit les deux autres alertes : qui les
-        // a éteintes, ou s'est vu refuser l'autorisation, ne se retrouve pas armé en silence.
+        // Des réglages écrits avant une alerte la font suivre l'état d'alerte d'alors : qui avait
+        // tout éteint, ou s'est vu refuser l'autorisation, ne se retrouve pas armé en silence.
+        let alertesDejaReglees = bloc.contains(.seuilAlerte) || bloc.contains(.seuilsAlerte)
+            || bloc.contains(.prevenirJetonExpirant)
         if let lue = try? bloc.decodeIfPresent(Bool.self, forKey: .prevenirDepenses) {
             prevenirDepenses = lue
-        } else if bloc.contains(.seuilAlerte) || bloc.contains(.prevenirJetonExpirant) {
-            prevenirDepenses = seuilAlerte != nil || prevenirJetonExpirant
+        } else if alertesDejaReglees {
+            prevenirDepenses = !seuilsAlerte.isEmpty || prevenirJetonExpirant
         }
+        let etatAnterieur = !seuilsAlerte.isEmpty || prevenirJetonExpirant || prevenirDepenses
+        let alertesAnterieures = alertesDejaReglees || bloc.contains(.prevenirDepenses)
+        if let lue = try? bloc.decodeIfPresent(Bool.self, forKey: .prevenirRythme) {
+            prevenirRythme = lue
+        } else if alertesAnterieures {
+            prevenirRythme = etatAnterieur
+        }
+        if let lue = try? bloc.decodeIfPresent(Bool.self, forKey: .prevenirRetour) {
+            prevenirRetour = lue
+        } else if alertesAnterieures {
+            prevenirRetour = etatAnterieur
+        }
+        if let lue = try? bloc.decodeIfPresent(String.self, forKey: .heuresCalmes) {
+            heuresCalmes = HeuresCalmes(rawValue: lue) ?? .desactivees
+        }
+        if let lue = try? bloc.decodeIfPresent(Bool.self, forKey: .masquerNoms) { masquerNoms = lue }
+        if let lue = try? bloc.decodeIfPresent(Bool.self, forKey: .exclureDesCaptures) { exclureDesCaptures = lue }
+        if let lue = try? bloc.decodeIfPresent(Bool.self, forKey: .ecrireStatutLocal) { ecrireStatutLocal = lue }
         reinitialisationAutomatique = try bloc.decodeIfPresent(Bool.self,
                                                                forKey: .reinitialisationAutomatique)
             ?? reinitialisationAutomatique
@@ -529,22 +708,22 @@ struct Reglages: Codable, Sendable, Equatable {
         bornerDelais()
     }
 
-    /// ⚠️ L'encodage synthétisé **tait** un optionnel nul. « Prévenir : jamais » ne
-    /// s'écrivait donc pas, et la lecture ci-dessus le relisait comme une clé absente,
-    /// c'est-à-dire comme 80 % : le réglage revenait tout seul au prochain lancement.
-    /// `encodeNil` inscrit le refus au lieu de l'omettre.
+    /// « Prévenir : jamais » s'écrit en liste vide, jamais par omission : une clé absente se
+    /// relit comme le défaut, et le réglage reviendrait tout seul au prochain lancement.
     func encode(to encodeur: Encoder) throws {
         var bloc = encodeur.container(keyedBy: CodingKeys.self)
         try bloc.encode(apparence, forKey: .apparence)
         try bloc.encode(affichageBarre, forKey: .affichageBarre)
         try bloc.encodeIfPresent(compteBarre, forKey: .compteBarre)
-        if let seuilAlerte {
-            try bloc.encode(seuilAlerte, forKey: .seuilAlerte)
-        } else {
-            try bloc.encodeNil(forKey: .seuilAlerte)
-        }
+        try bloc.encode(seuilsAlerte, forKey: .seuilsAlerte)
         try bloc.encode(prevenirJetonExpirant, forKey: .prevenirJetonExpirant)
         try bloc.encode(prevenirDepenses, forKey: .prevenirDepenses)
+        try bloc.encode(prevenirRythme, forKey: .prevenirRythme)
+        try bloc.encode(prevenirRetour, forKey: .prevenirRetour)
+        try bloc.encode(heuresCalmes, forKey: .heuresCalmes)
+        try bloc.encode(masquerNoms, forKey: .masquerNoms)
+        try bloc.encode(exclureDesCaptures, forKey: .exclureDesCaptures)
+        try bloc.encode(ecrireStatutLocal, forKey: .ecrireStatutLocal)
         try bloc.encode(grouperParFournisseur, forKey: .grouperParFournisseur)
         try bloc.encode(intervalleRafraichissementSecondes, forKey: .intervalleRafraichissementSecondes)
         try bloc.encode(navigateurWeb, forKey: .navigateurWeb)
@@ -661,16 +840,34 @@ struct Reglages: Codable, Sendable, Equatable {
 
 /// Persistance dans les préférences de l'app. Un réglage illisible ne casse rien :
 /// on repart des valeurs par défaut plutôt que de refuser de démarrer.
+/// Le consentement courant, lisible depuis n'importe quel fil sans attendre le fil principal : un
+/// travail sur une file du système le relit juste avant son effet, et une révocation faite entre
+/// sa programmation et son exécution l'arrête.
+final class MiroirConsentement: Sendable {
+    static let systeme = MiroirConsentement()
+
+    private let courant = Mutex(ConsentementMesure.aucun)
+
+    init() {}
+
+    func lire() -> ConsentementMesure { courant.withLock { $0 } }
+
+    func poser(_ consentement: ConsentementMesure) { courant.withLock { $0 = consentement } }
+}
+
 @MainActor
 final class MagasinReglages {
-    static let shared = MagasinReglages(defaults: .standard)
+    static let shared = MagasinReglages(defaults: .standard, miroir: .systeme)
     private static let cle = "reglages"
 
     private(set) var valeur: Reglages
     private let defaults: UserDefaults
+    private let miroir: MiroirConsentement?
 
-    init(defaults: UserDefaults) {
+    init(defaults: UserDefaults, miroir: MiroirConsentement? = nil) {
         self.defaults = defaults
+        self.miroir = miroir
+        defer { miroir?.poser(valeur.consentementMesure) }
         if let data = defaults.data(forKey: Self.cle),
            let lu = try? JSONDecoder().decode(Reglages.self, from: data) {
             valeur = lu
@@ -680,7 +877,11 @@ final class MagasinReglages {
     }
 
     func modifier(_ transformation: (inout Reglages) -> Void) {
+        let avant = valeur
         transformation(&valeur)
+        let retires = Set(Fournisseur.allCases.filter { avant.mesureArmee($0) && !valeur.mesureArmee($0) })
+        valeur.revocationsMesure = avant.revocationsMesure.suivies(de: valeur.revocationsMesure, retires: retires)
+        miroir?.poser(valeur.consentementMesure)
         if let data = try? JSONEncoder().encode(valeur) {
             defaults.set(data, forKey: Self.cle)
         }

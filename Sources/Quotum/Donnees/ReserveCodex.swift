@@ -221,7 +221,7 @@ enum ReserveCodex {
             return .success(jeton)
         case .absent: return .failure(.reconnexionNecessaire)
         // Un jeton personnel ne prouve aucun compte : rien de ciblé ne part avec lui.
-        case .empechee, .jetonPersonnel: return .failure(.indetermine)
+        case .empechee, .horsDePortee, .jetonPersonnel: return .failure(.indetermine)
         }
     }
 

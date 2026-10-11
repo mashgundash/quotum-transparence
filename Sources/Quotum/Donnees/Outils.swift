@@ -172,7 +172,8 @@ extension LectureFichier {
     static let blocPremiereLigne = 512
 
     /// La première ligne d'un fichier ordinaire, sans son retour ; `nil` si elle dépasse
-    /// `octetsMaximum` ou si le fichier finit avant elle. La lecture s'arrête au premier retour.
+    /// `octetsMaximum` ou si le fichier finit avant elle. La lecture s'arrête au bloc qui contient le
+    /// premier retour : ce qui le suit dans ce bloc, `blocPremiereLigne - 1` octets au plus, est jeté.
     static func premiereLigne(_ url: URL, octetsMaximum: Int) throws(Echec) -> Data? {
         let descripteur = open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
         guard descripteur >= 0 else {
@@ -204,6 +205,20 @@ extension LectureFichier {
                 return ligne
             }
             ligne.append(contentsOf: tampon[0..<lus])
+        }
+    }
+}
+
+/// La file où partent les travaux bloquants. ⚠️ Un travail planifié peut y attendre : ce qui doit
+/// valoir à l'instant d'un accès — un consentement — se relit dans le travail même, jamais avant.
+struct FileHorsFil: Sendable {
+    let planifier: @Sendable (@escaping @Sendable () -> Void) -> Void
+
+    static let systeme = FileHorsFil { DispatchQueue.global(qos: .utility).async(execute: $0) }
+
+    func executer<T: Sendable>(_ travail: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { suite in
+            planifier { suite.resume(returning: travail()) }
         }
     }
 }

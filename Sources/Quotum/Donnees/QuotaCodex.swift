@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Ce qu'un relevé direct de ChatGPT établit. Pendant de `ReleveAnthropic`, et sous
 /// la même réserve : il ne vaut que pour le compte dont `auth.json` détient le jeton,
@@ -37,6 +38,39 @@ enum ReleveCodex: Sendable, Equatable {
     case indetermine
     /// Aucun jeton ChatGPT sur cette machine : rien à relever.
     case aucun
+    /// La connexion est rangée là où Quotum ne peut pas la lire : rien n'est établi du quota, et
+    /// la dernière mesure n'est pas infirmée. `derniere` est le dernier relevé réussi de la même
+    /// source, à afficher avec sa date — ⛔ jamais une base de dépense.
+    case horsDePortee(EmpechementCodex, derniere: ReleveChatGPT? = nil)
+}
+
+/// Le dernier relevé direct réussi de chaque `CODEX_HOME`, en mémoire seulement : un refus du Trousseau
+/// n'infirme pas la mesure d'avant, qui porte le compte qu'elle prouve. `revocations` : les retraits du
+/// suivi de Codex que connaissait l'autorisation du relevé ; un de plus fait tout oublier, un relevé
+/// autorisé avant le dernier retrait connu n'est ni retenu ni rendu.
+final class DerniersRelevesCodex: Sendable {
+    private let memoire = Mutex<(releves: [String: ReleveChatGPT], revocations: UInt64)>(([:], 0))
+    static let partages = DerniersRelevesCodex()
+
+    /// Retient un relevé réussi, oublie la source sans connexion, et joint au refus sa dernière mesure.
+    func retenir(_ releve: ReleveCodex, source: String, revocations: UInt64) -> ReleveCodex {
+        memoire.withLock { memoire in
+            if revocations > memoire.revocations { memoire = ([:], revocations) }
+            guard revocations == memoire.revocations else { return .indetermine }
+            switch releve {
+            case .releve(let mesure):
+                memoire.releves[source] = mesure
+                return releve
+            case .aucun:
+                memoire.releves[source] = nil
+                return releve
+            case .horsDePortee(.accesRefuse, nil):
+                return .horsDePortee(.accesRefuse, derniere: memoire.releves[source])
+            case .horsDePortee, .reconnexionNecessaire, .indetermine:
+                return releve
+            }
+        }
+    }
 }
 
 /// Relevé direct du quota ChatGPT, calqué sur `QuotaAnthropic`. Il vient **en plus**
@@ -60,17 +94,56 @@ enum QuotaCodex {
                         delai: TimeInterval = 8,
                         fichier: URL? = nil,
                         cheminSansLien: Bool = false) async -> ReleveCodex {
-        switch await IdentifiantsCodex.jeton(fichier: fichier, cheminSansLien: cheminSansLien) {
+        await relever(fichier: fichier ?? IdentifiantsCodex.fichier(), cheminSansLien: cheminSansLien,
+                      acces: .systeme, memoire: .partages, consentementCourant: { MiroirConsentement.systeme.lire() },
+                      session: session, delai: delai)
+    }
+
+    /// La connexion du `CODEX_HOME` de `fichier`, lue là où le CLI la lit, puis relevée ; le
+    /// résultat passe par la mémoire de cette source.
+    ///
+    /// ⛔ `consentementCourant` sans valeur par défaut, comme `LectureCleCollee` : il est relu avant
+    /// l'accès au secret, après chaque attente et juste avant chaque envoi. Un retrait du suivi — même
+    /// réarmé depuis — arrête tout, et la réponse d'une requête déjà partie est jetée sans être retenue.
+    static func relever(fichier: URL, cheminSansLien: Bool, acces: AccesTrousseauCodex,
+                        memoire: DerniersRelevesCodex,
+                        consentementCourant: @escaping @Sendable () -> ConsentementMesure,
+                        session: URLSession, delai: TimeInterval) async -> ReleveCodex {
+        let accord = consentementCourant()
+        let autorise: @Sendable () -> Bool = { accord.restreint(a: consentementCourant())[.chatgpt] }
+        let lecture = await TrousseauCodex.jeton(fichier: fichier, cheminSansLien: cheminSansLien, acces: acces,
+                                                 autorise: autorise)
+        let releve = await relever(lecture: lecture, session: session, delai: delai, autorise: autorise)
+        guard autorise() else {
+            Journal.donnees.notice("Quota Codex : suivi changé pendant le relevé, réponse jetée")
+            return .indetermine
+        }
+        let source = TrousseauCodex.cheminCanonique(fichier.deletingLastPathComponent().path)
+        return memoire.retenir(releve, source: source, revocations: accord.revocations[.chatgpt])
+    }
+
+    /// Ce qu'une connexion lue permet de relever ; seule une connexion trouvée, encore `autorise`
+    /// au moment de l'envoi, fait partir une requête.
+    static func relever(lecture: LectureCodex, session: URLSession, delai: TimeInterval,
+                        autorise: @escaping @Sendable () -> Bool) async -> ReleveCodex {
+        switch lecture {
         case .jeton(let jeton):
+            guard autorise() else {
+                Journal.donnees.notice("Quota Codex : suivi changé avant l'envoi, rien ne part")
+                return .indetermine
+            }
             return await relever(jeton: jeton, session: session, delai: delai)
         case .jetonPersonnel(let jeton):
-            return await QuotaCodexJetonPersonnel.relever(jeton: jeton, session: session, delai: delai)
+            return await QuotaCodexJetonPersonnel.relever(jeton: jeton, session: session, delai: delai,
+                                                          autorise: autorise)
         case .absent:
             return .aucun
         // Une lecture empêchée n'établit pas l'absence de session : la prendre pour
         // telle effacerait une mesure que rien n'a infirmée.
         case .empechee:
             return .indetermine
+        case .horsDePortee(let empechement):
+            return .horsDePortee(empechement)
         }
     }
 

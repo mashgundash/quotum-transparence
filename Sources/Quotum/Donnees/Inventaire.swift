@@ -51,6 +51,8 @@ final class Inventaire: ObservableObject {
     /// La dernière dépense lue par chaque clé de lecture, pour le cycle où la requête ne
     /// rapporte rien. En mémoire seulement, comme `relevesRetenus`.
     private var depensesRetenues = DepensesRetenues()
+    /// La dernière limite reçue : un tour parti sous une autre s'y plie à sa publication.
+    private var derniereLimite: LimiteComptes?
 
     init() {}
 
@@ -95,6 +97,12 @@ final class Inventaire: ObservableObject {
                     cles: LecteursClesLecture,
                     lecteurs: LecteursDirects = .reels,
                     lecteursCodex: LecteursCodex = .reels) async {
+        derniereLimite = limite
+        if let fermees = PorteEssai.fermerSansReleve(limite, publiees: lignes, verrouillees: verrouillees,
+                                                     etablies: lignesEtablies) {
+            (lignes, verrouillees) = fermees
+            lignesEtablies = fermees.lignes
+        }
         guard !rafraichissementEnCours, let porte = PorteEssai(limite) else { return }
         rafraichissementEnCours = true
         dernierDepart = ContinuousClock.now
@@ -189,11 +197,12 @@ final class Inventaire: ObservableObject {
             toursCles = await clesLibres?.value ?? .empechees
         }
         consentement = consentement.restreint(a: consentementCourant())
-        let retires = Set(Fournisseur.allCases.filter { initial[$0] && !consentement[$0] })
+        let fin = Self.finDeTour(initial: initial, final: consentement, releves: releves, retenus: relevesRetenus)
+        relevesRetenus = fin.retenus
 
         publier(locaux: locaux, claude: claude, codex: codex, identite: identite,
                 consentement: consentement,
-                releves: Self.sansLesRetires(releves, retires),
+                releves: fin.publies,
                 historiques: historiques,
                 rollouts: rollouts,
                 applications: applications,
@@ -201,6 +210,17 @@ final class Inventaire: ObservableObject {
                 cles: toursCles,
                 limite: limite,
                 complet: true)
+    }
+
+    /// Ce qu'un tour publie et retient pour le suivant, une fois le consentement relu : un outil
+    /// retiré ou révoqué en cours de route n'est ni publié ni retenu — un relevé retenu d'avant une
+    /// révocation décrirait l'ancienne clé au tour suivant.
+    nonisolated static func finDeTour(initial: ConsentementMesure,
+                                      final: ConsentementMesure,
+                                      releves: RelevesDirects,
+                                      retenus: RelevesDirects) -> (publies: RelevesDirects, retenus: RelevesDirects) {
+        let retires = Set(Fournisseur.allCases.filter { initial[$0] && !final[$0] })
+        return (sansLesRetires(releves, retires), sansLesRetires(retenus, retires))
     }
 
     /// Ce qu'un tour a relevé pour un fournisseur dont le suivi a été retiré en cours de route
@@ -320,7 +340,7 @@ final class Inventaire: ObservableObject {
         }
         // ⛔ La porte s'applique ici, sur l'état publié, avant que quiconque le lise : les
         // alertes et le mode automatique ne voient d'une ligne verrouillée que son nom.
-        (lignes, verrouillees) = PorteEssai.appliquer(limite, a: fusionnees)
+        (lignes, verrouillees) = PorteEssai.appliquer(limite, derniere: derniereLimite, a: fusionnees)
         lectureProxyClaude = claude
         lectureProxyCodex = codex
         applicationsInstallees = applications

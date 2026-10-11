@@ -186,7 +186,7 @@ enum ReinitialisationCodex {
             return .reconnexionNecessaire
         // Une lecture empêchée n'établit rien — surtout pas que le jeton soit absent. Un jeton
         // personnel ne prouve aucun compte : rien ne se dépense avec lui.
-        case .empechee, .jetonPersonnel:
+        case .empechee, .horsDePortee, .jetonPersonnel:
             return .indetermine
         }
     }

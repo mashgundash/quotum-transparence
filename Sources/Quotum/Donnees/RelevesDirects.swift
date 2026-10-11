@@ -35,6 +35,8 @@ struct RelevesDirects: Sendable, Equatable {
     var doubao: ReleveDoubao
     var alibaba: ReleveAlibaba
     var amp: ReleveAmp
+    var zai: ReleveZai
+    var minimax: ReleveMiniMax
     /// Le fichier du relevé `chatgpt`, et les autres `auth.json` de Codex relevés ce cycle.
     var chatgptFichiers: FichiersCodex
 }
@@ -66,6 +68,8 @@ extension RelevesDirects {
                                               doubao: .indetermine,
                                               alibaba: .indetermine,
                                               amp: .indetermine,
+                                              zai: .indetermine,
+                                              minimax: .indetermine,
                                               chatgptFichiers: .aucun)
 
     /// Le seul endroit où les lecteurs directs sont appelés.
@@ -78,7 +82,7 @@ extension RelevesDirects {
     /// un appelant qui l'oublierait relèverait tout, ce qui est exactement ce que ce
     /// paramètre existe pour empêcher.
     ///
-    /// ⛔ Chacun des vingt-trois passe par `sousConsentement`, qui nomme son fournisseur.
+    /// ⛔ Chacun des vingt-cinq passe par `sousConsentement`, qui nomme son fournisseur.
     /// Un `async let` posé ici sans ce passage lirait les identifiants d'un autre logiciel
     /// sans que personne l'ait armé — c'est le défaut que ce fichier existe pour rendre
     /// impossible : sans consentement, `sousConsentement` rend `.indetermine` sans appeler
@@ -108,6 +112,8 @@ extension RelevesDirects {
         async let doubao = sousConsentement(.doubao, consentement, lecteur: lecteurs.doubao)
         async let alibaba = sousConsentement(.alibaba, consentement, lecteur: lecteurs.alibaba)
         async let amp = sousConsentement(.amp, consentement, lecteur: lecteurs.amp)
+        async let zai = sousConsentement(.zai, consentement, lecteur: lecteurs.zai)
+        async let minimax = sousConsentement(.minimax, consentement, lecteur: lecteurs.minimax)
 
         return await RelevesDirects(claude: claude,
                                     chatgpt: chatgpt,
@@ -132,6 +138,8 @@ extension RelevesDirects {
                                     doubao: doubao,
                                     alibaba: alibaba,
                                     amp: amp,
+                                    zai: zai,
+                                    minimax: minimax,
                                     // Les autres `auth.json` de Codex dépendent des apps de compte
                                     // et du proxy, que seul l'inventaire a lus : il les y pose.
                                     chatgptFichiers: .aucun)
@@ -155,9 +163,9 @@ extension RelevesDirects {
     }
 }
 
-/// Ce que rend un lecteur que personne n'a armé. Les vingt-trois états de lecteur le
+/// Ce que rend un lecteur que personne n'a armé. Les vingt-cinq états de lecteur le
 /// savent déjà dire — le protocole ne fait que le rendre exigible par la garde, pour
-/// qu'elle n'ait pas à recevoir cette valeur en paramètre à vingt-trois endroits où elle
+/// qu'elle n'ait pas à recevoir cette valeur en paramètre à vingt-cinq endroits où elle
 /// pourrait être mal choisie.
 protocol ReleveDirecte: Sendable {
     static var indetermine: Self { get }
@@ -186,8 +194,10 @@ extension ReleveAntigravity: ReleveDirecte {}
 extension ReleveDoubao: ReleveDirecte {}
 extension ReleveAlibaba: ReleveDirecte {}
 extension ReleveAmp: ReleveDirecte {}
+extension ReleveZai: ReleveDirecte {}
+extension ReleveMiniMax: ReleveDirecte {}
 
-/// Les vingt-trois lecteurs, tels que `relever` les appelle.
+/// Les vingt-cinq lecteurs, tels que `relever` les appelle.
 ///
 /// ⛔ **Aucune valeur par défaut, comme les champs de `RelevesDirects`, et pour la même
 /// raison** : un lecteur ajouté ne compile pas tant que personne n'a dit lequel appeler.
@@ -217,6 +227,8 @@ struct LecteursDirects: Sendable {
     var doubao: @Sendable () async -> ReleveDoubao
     var alibaba: @Sendable () async -> ReleveAlibaba
     var amp: @Sendable () async -> ReleveAmp
+    var zai: @Sendable () async -> ReleveZai
+    var minimax: @Sendable () async -> ReleveMiniMax
 
     static let reels = LecteursDirects(claude: { await QuotaAnthropic.relever() },
                                        chatgpt: { await QuotaCodex.relever() },
@@ -260,7 +272,9 @@ struct LecteursDirects: Sendable {
                                        antigravity: { await OutilsCLI.releverAntigravity() },
                                        doubao: { await OutilsCLI.releverDoubao() },
                                        alibaba: { await OutilsCLI.releverAlibaba() },
-                                       amp: { await OutilsCLI.releverAmp() })
+                                       amp: { await OutilsCLI.releverAmp() },
+                                       zai: { await LectureCleCollee.systeme.releverZai(session: Reseau.session, delai: 8) },
+                                       minimax: { await LectureCleCollee.systeme.releverMiniMax(session: Reseau.session, delai: 8) })
 }
 
 // MARK: - Les mesures, quand il y en a une
@@ -383,6 +397,16 @@ extension RelevesDirects {
         guard case .releve(let mesure) = amp else { return nil }
         return mesure
     }
+
+    var mesureZai: MesureZai? {
+        guard case .releve(let mesure) = zai else { return nil }
+        return mesure
+    }
+
+    var mesureMiniMax: MesureMiniMax? {
+        guard case .releve(let mesure) = minimax else { return nil }
+        return mesure
+    }
 }
 
 // MARK: - Ce qu'un lecteur sans mesure sait quand même dire
@@ -422,6 +446,8 @@ extension RelevesDirects {
         case .doubao: Self.cause(de: doubao)
         case .alibaba: Self.cause(de: alibaba)
         case .amp: Self.cause(de: amp)
+        case .zai: Self.cause(de: zai)
+        case .minimax: Self.cause(de: minimax)
         }
     }
 
@@ -448,6 +474,7 @@ extension RelevesDirects {
     private static func cause(de fichierCodex: ReleveCodex) -> Cause? {
         switch fichierCodex {
         case .reconnexionNecessaire: .authentification
+        case .horsDePortee(let empechement, _): empechement.cause
         case .releve, .indetermine, .aucun: nil
         }
     }
@@ -636,5 +663,114 @@ extension RelevesDirects {
         switch resultat {
         case .releve, .binaireIntrouvable, .echecCommande, .delaiDepasse, .refusee, .illisible, .indetermine: nil
         }
+    }
+
+    /// Une clé refusée ne se règle qu'en en collant une nouvelle dans Quotum. Le compte sans
+    /// forfait de codage a une clé valable : c'est la route du relevé qui n'a rien à lire.
+    private static func cause(de resultat: ReleveZai) -> Cause? {
+        switch resultat {
+        case .cleRefusee: .cleRefusee
+        case .sansForfait: .mesureIndisponible
+        case .releve, .indetermine, .sansCle: nil
+        }
+    }
+
+    private static func cause(de resultat: ReleveMiniMax) -> Cause? {
+        switch resultat {
+        case .cleRefusee: .cleRefusee
+        case .releve, .indetermine, .sansCle: nil
+        }
+    }
+}
+
+// MARK: - Les outils suivis par une clé collée
+
+/// Ce qu'une lecture de clé collée doit rendre selon ce que le Trousseau et le suivi disent.
+/// Chaque lecteur garde son propre type : seuls ces trois états sont communs.
+struct IssuesCleCollee<Releve: Sendable>: Sendable {
+    let sansCle: Releve
+    let indetermine: Releve
+}
+
+/// La lecture des outils suivis par une clé collée (Z.ai, MiniMax) : la clé du Trousseau de
+/// Quotum, puis la requête, encadrée de revalidations.
+///
+/// ⛔ Double porte : le suivi de l'outil **et** une clé présente. L'autorisation lue au départ est
+/// confrontée au consentement courant avant la lecture du secret, avant l'envoi et avant de rendre
+/// la réponse ; la génération de la clé, avant l'envoi et après. Le consentement se relit **après**
+/// chaque attente du Trousseau : une lecture d'attribut restituée en retard ne couvre pas un
+/// retrait fait pendant qu'elle attendait. Un retrait, un remplacement de clé ou un suivi coupé
+/// puis réarmé compte comme une révocation, et rien de ce qui a été autorisé avant ne part plus.
+struct LectureCleCollee: Sendable {
+    let magasin: MagasinClesOutil
+    /// Le consentement courant, révocations comprises, relu à chaque revalidation et dans le travail
+    /// qui lit le secret : il se lit donc sans attente, depuis n'importe quel fil. Aucune valeur par
+    /// défaut.
+    let consentementCourant: @Sendable () -> ConsentementMesure
+
+    static let systeme = LectureCleCollee(magasin: .systeme, consentementCourant: { MiroirConsentement.systeme.lire() })
+
+    func releverZai(session: URLSession, delai: TimeInterval) async -> ReleveZai {
+        await relever(.zai, .zai, issues: IssuesCleCollee(sansCle: .sansCle, indetermine: .indetermine)) { cle, region in
+            await QuotaZai.relever(cle: cle, region: region, session: session, delai: delai)
+        }
+    }
+
+    func releverMiniMax(session: URLSession, delai: TimeInterval) async -> ReleveMiniMax {
+        await relever(.minimax, .minimax,
+                      issues: IssuesCleCollee(sansCle: .sansCle, indetermine: .indetermine)) { cle, region in
+            await QuotaMiniMax.relever(cle: cle, region: region, session: session, delai: delai)
+        }
+    }
+
+    func relever<Releve: Sendable>(_ outil: OutilCle,
+                                   _ fournisseur: Fournisseur,
+                                   issues: IssuesCleCollee<Releve>,
+                                   demander: @Sendable (CleOutil, RegionCleOutil) async -> Releve) async -> Releve {
+        let accord = consentementCourant()
+        guard accord[fournisseur] else { return issues.indetermine }
+        let attribut: AttributCleOutil
+        switch await magasin.attribut(outil) {
+        case .absente: return issues.sansCle
+        case .empechee: return issues.indetermine
+        case .presente(let lu): attribut = lu
+        }
+        guard toujoursAutorise(fournisseur, accord) else {
+            Journal.donnees.notice("Clé \(outil.nom) : suivi changé avant la lecture du secret, rien n'est lu")
+            return issues.indetermine
+        }
+        let cle: CleOutil
+        let consentement = consentementCourant
+        switch await magasin.secret(outil, si: { accord.restreint(a: consentement())[fournisseur] }) {
+        case nil:
+            Journal.donnees.notice("Clé \(outil.nom) : suivi changé avant l'accès au Trousseau, rien n'est lu")
+            return issues.indetermine
+        case .absente: return issues.sansCle
+        case .empechee: return issues.indetermine
+        case .presente(let lue): cle = lue
+        }
+        guard await toujoursValable(outil, fournisseur, accord, generation: attribut.generation) else {
+            Journal.donnees.notice("Clé \(outil.nom) : suivi ou clé changés avant l'envoi, rien ne part")
+            return issues.indetermine
+        }
+        let releve = await demander(cle, attribut.region)
+        guard await toujoursValable(outil, fournisseur, accord, generation: attribut.generation) else {
+            Journal.donnees.notice("Clé \(outil.nom) : suivi ou clé changés pendant la requête, réponse jetée")
+            return issues.indetermine
+        }
+        return releve
+    }
+
+    private func toujoursAutorise(_ fournisseur: Fournisseur, _ accord: ConsentementMesure) -> Bool {
+        accord.restreint(a: consentementCourant())[fournisseur]
+    }
+
+    /// La génération d'abord, le consentement en dernier : c'est lui que l'utilisateur retire, et
+    /// il doit être lu après la dernière attente.
+    private func toujoursValable(_ outil: OutilCle, _ fournisseur: Fournisseur, _ accord: ConsentementMesure,
+                                 generation: UUID) async -> Bool {
+        guard case .presente(let courant) = await magasin.attribut(outil),
+              courant.generation == generation else { return false }
+        return toujoursAutorise(fournisseur, accord)
     }
 }

@@ -541,14 +541,15 @@ enum QuotaCursor {
     static func decoderUsage(_ donnees: Data) -> Quota? {
         guard let reponse = try? JSONDecoder().decode(ReponseUsage.self, from: donnees) else { return nil }
         let reserves = reponse.reserves
-        let mois = { (lu: Pourcentage, reserve: String?) -> Fenetre? in
+        let mois = { (lu: Pourcentage, reserve: String?, cle: String?) -> Fenetre? in
             guard case .valeur(let utilisation) = lu else { return nil }
             return Fenetre(libelle: Fenetre.libelleMois,
                            sorte: .mois,
                            utilisation: utilisation,
                            seRechargeA: reponse.finDeCycle,
                            duree: nil,
-                           reserve: reserve)
+                           reserve: reserve,
+                           cleReserve: cle)
         }
 
         let fenetres: [Fenetre]
@@ -556,10 +557,10 @@ enum QuotaCursor {
             // Une réserve publiée mais illisible : la moitié du forfait est inconnue, et
             // montrer l'autre seule laisserait lire le compte entier à travers elle.
             guard reserves.auto != .illisible, reserves.api != .illisible else { return nil }
-            fenetres = [mois(reserves.auto, libelleModelesCursor),
-                        mois(reserves.api, libelleAutresModeles)].compactMap { $0 }
+            fenetres = [mois(reserves.auto, libelleModelesCursor, "auto"),
+                        mois(reserves.api, libelleAutresModeles, "api")].compactMap { $0 }
         } else {
-            fenetres = [mois(reserves.total, nil)].compactMap { $0 }
+            fenetres = [mois(reserves.total, nil, nil)].compactMap { $0 }
         }
         return fenetres.isEmpty ? nil : Quota(fenetres)
     }
