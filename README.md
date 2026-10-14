@@ -64,6 +64,7 @@ diff <(find . -path ./.git -prune -o \( -type f -o -type l \) ! -path ./SHA256SU
 | `Sources/Quotum/Donnees/ReleveurMuse.swift` | La cadence de Muse Code — chaque mesure crée une clé sur votre compte Meta : un envoi au plus toutes les quinze minutes, même après une relance de l'application |
 | `Sources/Quotum/Systeme/LanceurCLISysteme.swift`, `Sources/Quotum/Systeme/ResultatCLI.swift`, `Sources/Quotum/Donnees/OutilsCLI.swift` | La seule exécution d'un binaire tiers : chemin vérifié, liste fermée, jamais de shell, sortie bornée |
 | `Sources/Quotum/Donnees/ReserveCodex.swift` | La réserve et l'historique des réinitialisations Codex, lus quand vous dépliez le tiroir |
+| `Sources/Quotum/Donnees/StatistiquesCodex.swift` | L'usage Codex jour par jour, lu au même dépli : une requête qui se présente comme Quotum, dont seuls l'usage par jour et par semaine et la date des données sont gardés, en mémoire |
 | `Sources/Quotum/Donnees/LecteurProxy.swift` | Les deux proxys de la boucle locale |
 | `Sources/Quotum/Donnees/RelevesDirects.swift` | La garde de consentement, fournisseur par fournisseur |
 | `Sources/Quotum/Donnees/Inventaire.swift` | Le seul appel de cette garde, et les lectures faites sans elle |

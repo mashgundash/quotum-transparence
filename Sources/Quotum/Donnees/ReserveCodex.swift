@@ -192,7 +192,7 @@ enum ReserveCodex {
                                     complet: complet)
     }
 
-    private enum Refus: Error {
+    enum Refus: Error {
         case sansConsentement, compteDifferent, reconnexionNecessaire, indetermine
 
         func lecture<V>() -> LectureReserveCodex<V> {
@@ -209,9 +209,9 @@ enum ReserveCodex {
     /// n'est même pas ouvert — puis **relu après**, avant la première requête. ⛔ Le compte se prouve par le jeton lui-même, sous la règle
     /// de `ReinitialisationCodex` (`JetonCodex.estDuCompte`) : un `codex login` intercalé
     /// aurait remplacé la session, et `account_id` seul n'est qu'une déclaration.
-    private static func jetonAutorise(consentement: LecteurConsentement,
-                                      compteAttendu: String,
-                                      lireJeton: LecteurJeton) async -> Result<JetonCodex, Refus> {
+    static func jetonAutorise(consentement: LecteurConsentement,
+                              compteAttendu: String,
+                              lireJeton: LecteurJeton) async -> Result<JetonCodex, Refus> {
         guard await consentement()[.chatgpt] else { return .failure(.sansConsentement) }
         let lu = await lireJeton()
         guard await consentement()[.chatgpt] else { return .failure(.sansConsentement) }

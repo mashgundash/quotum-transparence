@@ -219,7 +219,7 @@ enum MesureParJeton {
                         chemin: Mots.dit("<CODEX_HOME>/auth.json · Trousseau · « %1$@ »", TrousseauCodex.service),
                         // La seconde requête est celle de la mesure par jeton personnel
                         // (`QuotaCodexJetonPersonnel`) : la route d'identité d'OpenAI.
-                        detail: Mots.dit("Les connexions de Codex : ~/.codex/auth.json ou $CODEX_HOME, ou l'élément « Codex Auth » du Trousseau quand Codex y range sa connexion, le CODEX_HOME de chaque app de compte, et le dossier que publie un proxy local · une requête à chatgpt.com par fichier auth.json lu, un même dossier une seule fois, plus une à auth.openai.com pour une clé d'accès personnelle · et, quand vous dépliez le tiroir d'un compte, deux lectures à chatgpt.com : sa réserve de réinitialisations et leur historique"))
+                        detail: Mots.dit("Les connexions de Codex : ~/.codex/auth.json ou $CODEX_HOME, ou l'élément « Codex Auth » du Trousseau quand Codex y range sa connexion, le CODEX_HOME de chaque app de compte, et le dossier que publie un proxy local · une requête à chatgpt.com par fichier auth.json lu, un même dossier une seule fois, plus une à auth.openai.com pour une clé d'accès personnelle · et, quand vous dépliez le tiroir d'un compte, des lectures à chatgpt.com : sa réserve de réinitialisations et leur historique, et son usage par jour sur douze semaines"))
         case .windsurf:
             Description(fournisseur: fournisseur,
                         chemin: "~/Library/…/Windsurf/…/state.vscdb · ~/.local/share/devin/credentials.toml",

@@ -199,7 +199,7 @@ struct GardesReseauTests {
         }
     }
 
-    /// Les vingt lecteurs qui émettent une requête, plus les dix-neuf requêtes qui
+    /// Les vingt lecteurs qui émettent une requête, plus les vingt requêtes qui
     /// n'appartiennent à aucun d'eux.
     private static func requetesSortantes() throws -> [(String, URLRequest)] {
         let statut = try #require(SourceProxy.adresseLocale("http://127.0.0.1:8787/abc123/_proxy/status"))
@@ -220,6 +220,8 @@ struct GardesReseauTests {
                        try #require(ReserveCodex.requeteReserve(jeton: jetonCodex))))
         toutes.append(("l'historique des réinitialisations Codex",
                        try #require(ReserveCodex.requeteHistorique(jeton: jetonCodex, curseur: "page 2&x=1"))))
+        // L'usage par jour, lu au dépli du même tiroir.
+        toutes.append(("l'usage Codex par jour", try #require(StatistiquesCodex.requete(jeton: jetonCodex))))
         // Codex par jeton personnel : l'identité, puis la mesure — la seule exception admise.
         toutes.append((identitePersonnelle,
                        try #require(QuotaCodexJetonPersonnel.requeteIdentite(jeton: jetonPersonnelCodex, delai: 8))))
@@ -361,7 +363,7 @@ struct GardesReseauTests {
     func aucunDeguisementEnClientOfficiel() throws {
         let sortantes = try Self.requetesSortantes()
         // Sans ce plancher, une liste devenue vide passerait sans rien avoir regardé.
-        #expect(sortantes.count == Fournisseur.allCases.count - Self.sansRequete.count + 19)
+        #expect(sortantes.count == Fournisseur.allCases.count - Self.sansRequete.count + 20)
         let fautes = Self.imitations(sortantes, admises: Self.exceptionsAdmises)
         #expect(fautes.isEmpty, "l'app s'y annonce comme le client officiel : \(fautes.joined(separator: " · "))")
         // Hors des deux requêtes du jeton personnel, aucune ne porte même un User-Agent de client.
@@ -579,6 +581,23 @@ struct GardesReseauTests {
             let noms = Set((requete.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
             #expect(noms == ["authorization", "accept", "user-agent", "chatgpt-account-id"])
         }
+    }
+
+    /// Le `GET` mesuré le 13/10/2026 : sans aucun déguisement, jeton sur la requête.
+    @Test("L'usage Codex par jour : adresse exacte, GET sans corps, quatre en-têtes, nom propre")
+    func usageCodexParJour() throws {
+        let requete = try #require(StatistiquesCodex.requete(jeton: Self.jetonCodex))
+        #expect(requete.url?.absoluteString == "https://chatgpt.com/backend-api/wham/profiles/me")
+        #expect(requete.httpMethod == "GET")
+        #expect(requete.httpBody == nil)
+        #expect(requete.value(forHTTPHeaderField: "Authorization") == "Bearer jeton-de-test")
+        #expect(requete.value(forHTTPHeaderField: "User-Agent") == "Quotum")
+        #expect(requete.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "compte-de-test")
+        #expect(requete.value(forHTTPHeaderField: "originator") == nil)
+        let noms = Set((requete.allHTTPHeaderFields ?? [:]).keys.map { $0.lowercased() })
+        #expect(noms == ["authorization", "accept", "user-agent", "chatgpt-account-id"])
+        let inscrites = try Self.requetesSortantes().filter { $0.1.url == requete.url }
+        #expect(inscrites.count == 1, "l'usage Codex n'est pas inscrit une fois et une seule aux requêtes sortantes")
     }
 
     /// Kilo n'a pas encore de `Fournisseur` : son jeu d'en-têtes se pince ici, hors de

@@ -69,6 +69,21 @@ enum Reseau {
         configuration.timeoutIntervalForRequest = 10
         return URLSession(configuration: configuration)
     }()
+
+    /// Le travail, ou `nil` si l'échéance tombe avant lui — auquel cas il est annulé.
+    static func avantEcheance<Valeur: Sendable>(_ secondes: TimeInterval,
+                                                _ travail: @escaping @Sendable () async -> Valeur) async -> Valeur? {
+        await withTaskGroup(of: Valeur?.self) { groupe in
+            groupe.addTask { await travail() }
+            groupe.addTask {
+                try? await Task.sleep(for: .seconds(secondes))
+                return nil
+            }
+            let premier = await groupe.next() ?? nil
+            groupe.cancelAll()
+            return premier
+        }
+    }
 }
 
 /// ⛔ Un jeton posé sur la requête ne suit aucune redirection qui quitte son hôte, ni ne
